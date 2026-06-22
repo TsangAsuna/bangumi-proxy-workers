@@ -8,7 +8,7 @@
  *
  * 路由规则：所有请求共享 API 域名，Worker 按请求路径自动分流：
  *   /v0/*                       ->  api.bgm.tv
- *   /p1/xxx/comments 等评论接口   ->  next.bgm.tv
+ *   /p1/*                       ->  next.bgm.tv
  *   /*                          ->  lain.bgm.tv（图片域名）
  *
  * 关键点：API 返回的 JSON 里图片地址是写死的 lain.bgm.tv 绝对 URL，
@@ -75,7 +75,7 @@ export default {
     }
 
     // API 域名 -> 按路径决定上游
-    const upstream = url.pathname.includes("/comments") ? BGM_API_NEXT : BGM_API;
+    const upstream = url.pathname.startsWith("/p1/") ? BGM_API_NEXT : BGM_API;
 
     // 健康检查 / 调试
     if (url.pathname === "/__health") {
