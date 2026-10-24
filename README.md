@@ -198,6 +198,24 @@ Cloudflare 是 anycast 网络：**任何 CF 边缘 IP 都受理任意 CF 托管�
 - **官方 Bangumi App（iOS）**：建议用[镜像根域四域名方案](https://github.com/)（`next.<根域>` / `lain.<根域>` 子域路由），本仓库单域形态不覆盖其子域派生。
 - **NipaPlay**：Bangumi 服务器填 API 域名即可；JSON 里图片链接已改写。
 
+### 实测结果（移动宽带 IPv6 出口，2026-10）
+
+| 场景 | 默认 DNS（LAX 美西） | 优选 IP（HKG 香港） | 提升 |
+| --- | --- | --- | --- |
+| TCP RTT | 218~425ms（中位 234ms） | **38~51ms（中位 ~42ms）** | **-82%** |
+| 冷连接完整 HTTPS | 中位 948ms | 中位 ~460ms | -51% |
+| keep-alive 复用连接单请求 | ~243ms | **58~67ms（两位数）** | **~4x** |
+| Cloudflare colo | LAX | **HKG** | — |
+
+优选 IP：`104.18.43.250`（备选 `104.18.43.70` / `104.18.43.77` / `104.19.43.77`，同走 HKG）。
+
+**注意事项**：
+
+- CF 的 anycast 路由按 /24 细分前缀公告，HKG 路由只覆盖部分段；扫描出的低延迟 IP 必须逐个过 `/__health` 验证（部分段返回 `403 error code: 1034` Edge IP Restricted，不受理非自家域 SNI）。
+- IPv6 段（2606:4700::/32）无 <100ms 路由（最优 155ms 走 SEA）——hosts 条目优先级高于系统 IPv6 偏好，务必用 IPv4 hosts。
+- HKG 路由由 CF BGP 决定，可能随时间调整；IP 失效时重扫即可（任何 TCP 443 扫描器 + `curl --resolve <域>:443:<IP> https://<域>/__health` 验证 200）。
+- 冷连接总时延（~460ms）的剩余瓶颈是 CMCC 国际出口在 TLS 握手阶段的抖动 + Win10 Schannel 无 TLS 1.3；现代浏览器（TLS 1.3 + keep-alive）单请求即上表的复用数字。
+
 ### 本 fork 相对上游的改动
 
 - 公开 GET API 边缘缓存 120s（无凭据请求二次访问零回源）；
