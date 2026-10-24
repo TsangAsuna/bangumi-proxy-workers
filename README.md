@@ -152,3 +152,54 @@ GET https://bgmimg.retr0.xyz/abc123xyz/pic/cover/l/ab/cd/12345.jpg
 ## 鸣谢
 
 本脚本基于 [Yuri-NagaSaki/bangumi-proxy](https://github.com/Yuri-NagaSaki/bangumi-proxy) 修改而来。
+
+
+---
+
+## 延迟优化：把边缘 RTT 压进两位数毫秒
+
+### 延迟去哪了（实测拆解，大陆移动宽带 IPv6 → Cloudflare 美西 LAX）
+
+以 worker 本地响应 `/__health`（零回源）为基准，单请求 ~930ms 的构成：
+
+| 阶段 | 耗时 | 占比 |
+| --- | --- | --- |
+| DNS | ~6ms（缓存热） | <1% |
+| TCP 握手 | ~220ms | 23% |
+| TLS 握手 | ~450ms | 49% |
+| 请求→首字节 | ~250ms（其中 worker 开销仅 ~20ms） | 27% |
+
+**结论：几乎全部时延是大陆↔美西的地理 RTT**（单 RTT ≈ 220ms，光纤物理下限 ~130ms），worker 代码本身只有 ~20ms，代码层无压榨空间。TLS/传输层优化（TLS1.3、h2/h3、连接复用）只能把 929ms 降到 ~243ms，RTT 本身不动。
+
+### 唯一能把 RTT 压进两位数的路径：优选 IP
+
+Cloudflare 是 anycast 网络：**任何 CF 边缘 IP 都受理任意 CF 托管域名的 SNI**。所以只要找到对本地 ISP 延迟最低的边缘 IP（走香港/东京等亚太 colo 的路由），把域名指向它，RTT 就能从 220ms 降到 30~80ms。
+
+**方法一：本机 hosts（只影响本机，最简单）**
+
+1. 用优选工具（如 [CloudflareSpeedTest](https://github.com/XIU2/CloudflareSpeedTest)）扫出低延迟 IP；
+2. 编辑 `C:\Windows\System32\drivers\etc\hosts`，加一行：
+   ```text
+   <优选IP>  你的API域名
+   <优选IP>  你的图片域名
+   ```
+3. 客户端清 DNS 缓存后实测。
+
+**方法二：自定义域（全端生效，需要你有一个域名）**
+
+1. 域名 NS 托管到 Cloudflare；
+2. Worker 绑定 Custom Domain；
+3. **关键**：把该域名的解析记录 A 值手动改成优选 IP（CF DNS 里"仅 DNS"灰云），或客户端侧用 DoH 指向优选；
+4. App 端（无法改 hosts）由此吃到优选线路——这是手机端把 RTT 压进两位数的唯一办法。
+
+### 客户端填法速查
+
+- **czy0729/Bangumi（安卓）**：主站 `https://<API域>/site`、API `https://<API域>/api`、图片 `https://<IMG域>/img`；「自建 Worker」开关关闭（透明反代形态）。注意该客户端收藏/进度走**旧版 API**（`/collection/<id>`、`/ep/<id>/status`），本 worker 的 API 域名路由已覆盖（非 /p1 的路径全部转发 api.bgm.tv）。
+- **官方 Bangumi App（iOS）**：建议用[镜像根域四域名方案](https://github.com/)（`next.<根域>` / `lain.<根域>` 子域路由），本仓库单域形态不覆盖其子域派生。
+- **NipaPlay**：Bangumi 服务器填 API 域名即可；JSON 里图片链接已改写。
+
+### 本 fork 相对上游的改动
+
+- 公开 GET API 边缘缓存 120s（无凭据请求二次访问零回源）；
+- 缓存键带 IMG_HOST 维度；带凭据请求不缓存；
+- `x-upstream` / `x-cache` 调试头。
