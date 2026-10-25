@@ -216,6 +216,16 @@ Cloudflare 是 anycast 网络：**任何 CF 边缘 IP 都受理任意 CF 托管�
 - HKG 路由由 CF BGP 决定，可能随时间调整；IP 失效时重扫即可（任何 TCP 443 扫描器 + `curl --resolve <域>:443:<IP> https://<域>/__health` 验证 200）。
 - 冷连接总时延（~460ms）的剩余瓶颈是 CMCC 国际出口在 TLS 握手阶段的抖动 + Win10 Schannel 无 TLS 1.3；现代浏览器（TLS 1.3 + keep-alive）单请求即上表的复用数字。
 
+### czy0729/Bangumi（安卓客户端）兼容说明
+
+该客户端有三个填入位 + 大量**旧版 API** 调用，是兼容性最容易翻车的场景：
+
+1. **三前缀填法**：主站 `https://<API域>/site`、API `https://<API域>/api`、图片 `https://<IMG域>/img`（结尾不带斜杠）；「自建 Worker」开关保持**关闭**。
+2. **旧版 API 路由**：客户端收藏/进度走 `/collection/<id>`、`/ep/<id>/status`、`/subject/<id>/update-watched`、`/user/<id>/collections`、`/calendar`——这些不是 v0！本 fork 的 API 域名路由：`/p1/*` → next.bgm.tv，**其余全部 → api.bgm.tv**，旧版路径天然覆盖。
+3. **图片路径白名单**：lain 的图片子目录远不止 cover/user——**`/pic/crt/`（角色与制作人员）**等。判定按顶级目录放行（`/pic/`、`/r/<尺寸>/`），不要枚举子目录，否则角色缩略图全 404。
+4. **登录**：客户端 v2 登录是**多步会话流程**（GET /login 拿 sid+formhash → POST /FollowTheRabbit）。`bgm.tv` 与 `bangumi.tv`/`chii.in` 的会话 cookie **互不相认**——反代若对这些请求做多上游切换/缓存，登录必败。务必**固定单上游纯透传**。
+5. **图片测速红叉 ≠ 故障**：客户端 ping 是 XHR GET + **3 秒硬超时、无重试**（`src/utils/fetch/xhr.ts`）。CF 缓存按节点（colo）隔离，首次测速撞上冷节点会回源 lain（波动 0.9~2.7s）→ 超 3s → 红叉；**再测一次（节点已热）即绿**。图片实际加载走 Glide + DoH 的另一套网络栈（无 3s 限制），**以能否刷出图为准**。
+
 ### 本 fork 相对上游的改动
 
 - 公开 GET API 边缘缓存 120s（无凭据请求二次访问零回源）；
